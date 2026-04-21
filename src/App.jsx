@@ -131,7 +131,7 @@ async function exportPDF(docs, checked) {
   ])
   doc.autoTable({
     startY: 30,
-    head: [['No', 'Tanggal', 'Nomor Surat', 'Perihal', 'Pengirim', 'Dimiliki', 'Ringkasan']],
+    head: [['No', 'Tanggal', 'Nomor Surat', 'Perihal', 'Pengirim', 'Dok. Ada', 'Ringkasan']],
     body: rows,
     styles: { fontSize: 6.5, cellPadding: 2, overflow: 'linebreak' },
     headStyles: { fillColor: [20, 20, 20], textColor: 255, fontStyle: 'bold' },
@@ -160,7 +160,7 @@ function DetailPanel({ doc, checked, onToggleCheck, onClose }) {
           className={`dp-check-btn${isDone ? ' done' : ''}`}
           onClick={() => onToggleCheck(doc.id)}
         >
-          {isDone ? '✓ Dokumen Dimiliki' : '○ Tandai Sudah Dimiliki'}
+          {isDone ? '✓ Dokumen Ada' : '○ Tandai Dokumen Ada'}
         </button>
 
         <div className="dp-num">
@@ -323,14 +323,14 @@ export default function App() {
 
         {/* Filter kepemilikan */}
         <div className="filter-row">
-          <span className="filter-lbl">Dimiliki</span>
+          <span className="filter-lbl">Dok. Ada</span>
           <div className="filter-pills">
             <button className={`cp${filterOwned === null ? ' active' : ''}`} onClick={() => setFilterOwned(null)}>Semua</button>
             <button className={`cp owned-pill${filterOwned === 'owned' ? ' active' : ''}`} onClick={() => setFilterOwned(filterOwned === 'owned' ? null : 'owned')}>
-              ✓ Sudah dimiliki <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{checkedCount}</span>
+              ✓ Dokumen Ada <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{checkedCount}</span>
             </button>
             <button className={`cp missing-pill${filterOwned === 'missing' ? ' active' : ''}`} onClick={() => setFilterOwned(filterOwned === 'missing' ? null : 'missing')}>
-              ○ Belum dimiliki <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{DOCS.length - checkedCount}</span>
+              ○ Dokumen Belum Ada <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{DOCS.length - checkedCount}</span>
             </button>
           </div>
         </div>
@@ -341,7 +341,7 @@ export default function App() {
         <div className="progress-bar">
           <div className="progress-fill" style={{ width: `${(checkedCount / DOCS.length) * 100}%` }} />
         </div>
-        <span className="progress-label">{checkedCount} / {DOCS.length} dokumen dimiliki</span>
+        <span className="progress-label">{checkedCount} / {DOCS.length} dokumen ada</span>
       </div>
 
       {/* Timeline */}
@@ -391,9 +391,9 @@ export default function App() {
                       <button
                         className={`check-btn${isDone ? ' checked' : ''}`}
                         onClick={(e) => toggleCheck(d.id, e)}
-                        title={isDone ? 'Tandai belum dimiliki' : 'Tandai sudah dimiliki'}
+                        title={isDone ? 'Batalkan' : 'Tandai dokumen ada'}
                       >
-                        {isDone ? '✓ Dimiliki' : '+ Tandai Dimiliki'}
+                        {isDone ? '✓ Dokumen Ada' : '+ Dokumen Ada'}
                       </button>
                     </div>
                   </div>
