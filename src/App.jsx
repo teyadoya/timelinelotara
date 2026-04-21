@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { DOCS, CAT_LABELS, categorize, parseDateKey, getYear } from './docs.js'
 
 // ── Login Gate ────────────────────────────────────────────────────────────────
@@ -104,8 +104,8 @@ function LoginPage({ onLogin }) {
   )
 }
 
-
-async function exportPDF(docs) {
+// ── PDF Export ────────────────────────────────────────────────────────────────
+async function exportPDF(docs, checked) {
   const { jsPDF } = await import('jspdf')
   await import('jspdf-autotable')
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
@@ -126,17 +126,18 @@ async function exportPDF(docs) {
     d.nomor_surat && d.nomor_surat !== '-' ? d.nomor_surat : '—',
     d.perihal || '—',
     d.pengirim || '—',
-    (d.ringkasan || '').substring(0, 220) + ((d.ringkasan?.length ?? 0) > 220 ? '...' : ''),
+    checked.has(d.id) ? '✓' : '—',
+    (d.ringkasan || '').substring(0, 200) + ((d.ringkasan?.length ?? 0) > 200 ? '...' : ''),
   ])
   doc.autoTable({
     startY: 30,
-    head: [['No', 'Tanggal', 'Nomor Surat', 'Perihal', 'Pengirim', 'Ringkasan']],
+    head: [['No', 'Tanggal', 'Nomor Surat', 'Perihal', 'Pengirim', 'Dimiliki', 'Ringkasan']],
     body: rows,
     styles: { fontSize: 6.5, cellPadding: 2, overflow: 'linebreak' },
     headStyles: { fillColor: [20, 20, 20], textColor: 255, fontStyle: 'bold' },
     columnStyles: {
-      0: { cellWidth: 7 }, 1: { cellWidth: 25 }, 2: { cellWidth: 33 },
-      3: { cellWidth: 38 }, 4: { cellWidth: 40 }, 5: { cellWidth: 'auto' },
+      0: { cellWidth: 7 }, 1: { cellWidth: 24 }, 2: { cellWidth: 30 },
+      3: { cellWidth: 35 }, 4: { cellWidth: 36 }, 5: { cellWidth: 14 }, 6: { cellWidth: 'auto' },
     },
     alternateRowStyles: { fillColor: [245, 245, 245] },
     margin: { left: 14, right: 14 },
@@ -145,13 +146,23 @@ async function exportPDF(docs) {
 }
 
 // ── Detail Panel ──────────────────────────────────────────────────────────────
-function DetailPanel({ doc, onClose }) {
+function DetailPanel({ doc, checked, onToggleCheck, onClose }) {
   const cat = categorize(doc.perihal)
+  const isDone = checked.has(doc.id)
   return (
     <>
       <div className="overlay" onClick={onClose} />
       <div className="dp">
         <button className="dp-close" onClick={onClose}>✕</button>
+
+        {/* checklist di detail panel */}
+        <button
+          className={`dp-check-btn${isDone ? ' done' : ''}`}
+          onClick={() => onToggleCheck(doc.id)}
+        >
+          {isDone ? '✓ Dokumen Dimiliki' : '○ Tandai Sudah Dimiliki'}
+        </button>
+
         <div className="dp-num">
           {doc.nomor_surat && doc.nomor_surat !== '-' ? doc.nomor_surat : '— Tanpa Nomor Surat —'}
         </div>
@@ -177,10 +188,29 @@ function DetailPanel({ doc, onClose }) {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(() => sessionStorage.getItem('kl_auth') === '1')
-  const [search, setSearch]       = useState('')
+  const [search, setSearch]         = useState('')
   const [activeYear, setActiveYear] = useState(null)
-  const [activeCat, setActiveCat]  = useState(null)
-  const [selected, setSelected]    = useState(null)
+  const [activeCat, setActiveCat]   = useState(null)
+  const [selected, setSelected]     = useState(null)
+  const [filterOwned, setFilterOwned] = useState(null) // null | 'owned' | 'missing'
+
+  // ── Checklist state — persisted in localStorage ──
+  const [checked, setChecked] = useState(() => {
+    try {
+      const raw = localStorage.getItem('kl_checked')
+      return raw ? new Set(JSON.parse(raw)) : new Set()
+    } catch { return new Set() }
+  })
+
+  const toggleCheck = useCallback((id, e) => {
+    if (e) e.stopPropagation()
+    setChecked(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      try { localStorage.setItem('kl_checked', JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }, [])
 
   // Year counts
   const yearCounts = useMemo(() => {
@@ -206,10 +236,13 @@ export default function App() {
         const cOk = activeCat  === null || categorize(d.perihal) === activeCat
         const sOk = !q || [d.perihal, d.nomor_surat, d.pengirim, d.tanggal, d.ringkasan]
           .some(v => (v ?? '').toLowerCase().includes(q))
-        return yOk && cOk && sOk
+        const oOk = filterOwned === null
+          || (filterOwned === 'owned' && checked.has(d.id))
+          || (filterOwned === 'missing' && !checked.has(d.id))
+        return yOk && cOk && sOk && oOk
       })
       .sort((a, b) => parseDateKey(a.tanggal) - parseDateKey(b.tanggal))
-  }, [search, activeYear, activeCat])
+  }, [search, activeYear, activeCat, filterOwned, checked])
 
   // Group by year
   const grouped = useMemo(() => {
@@ -223,7 +256,11 @@ export default function App() {
     return groups
   }, [filtered])
 
-  const handleExport = useCallback(() => exportPDF(filtered), [filtered])
+  const checkedCount = useMemo(() => {
+    return DOCS.filter(d => checked.has(d.id)).length
+  }, [checked])
+
+  const handleExport = useCallback(() => exportPDF(filtered, checked), [filtered, checked])
 
   if (!authed) return <LoginPage onLogin={() => setAuthed(true)} />
 
@@ -259,18 +296,9 @@ export default function App() {
         <div className="filter-row">
           <span className="filter-lbl">Tahun</span>
           <div className="filter-pills">
-            <button
-              className={`yp${activeYear === null ? ' active' : ''}`}
-              onClick={() => setActiveYear(null)}
-            >
-              Semua
-            </button>
+            <button className={`yp${activeYear === null ? ' active' : ''}`} onClick={() => setActiveYear(null)}>Semua</button>
             {years.map(y => (
-              <button
-                key={y}
-                className={`yp${activeYear === y ? ' active' : ''}`}
-                onClick={() => setActiveYear(activeYear === y ? null : y)}
-              >
+              <button key={y} className={`yp${activeYear === y ? ' active' : ''}`} onClick={() => setActiveYear(activeYear === y ? null : y)}>
                 {y} <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{yearCounts[y]}</span>
               </button>
             ))}
@@ -282,25 +310,38 @@ export default function App() {
         <div className="filter-row">
           <span className="filter-lbl">Kategori</span>
           <div className="filter-pills">
-            <button
-              className={`cp${activeCat === null ? ' active' : ''}`}
-              onClick={() => setActiveCat(null)}
-            >
-              Semua
-            </button>
-            {Object.entries(CAT_LABELS)
-              .filter(([k]) => catCounts[k])
-              .map(([k, label]) => (
-                <button
-                  key={k}
-                  className={`cp${activeCat === k ? ' active' : ''}`}
-                  onClick={() => setActiveCat(activeCat === k ? null : k)}
-                >
-                  {label} <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{catCounts[k] ?? 0}</span>
-                </button>
-              ))}
+            <button className={`cp${activeCat === null ? ' active' : ''}`} onClick={() => setActiveCat(null)}>Semua</button>
+            {Object.entries(CAT_LABELS).filter(([k]) => catCounts[k]).map(([k, label]) => (
+              <button key={k} className={`cp${activeCat === k ? ' active' : ''}`} onClick={() => setActiveCat(activeCat === k ? null : k)}>
+                {label} <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{catCounts[k] ?? 0}</span>
+              </button>
+            ))}
           </div>
         </div>
+
+        <div className="filter-sep" />
+
+        {/* Filter kepemilikan */}
+        <div className="filter-row">
+          <span className="filter-lbl">Dimiliki</span>
+          <div className="filter-pills">
+            <button className={`cp${filterOwned === null ? ' active' : ''}`} onClick={() => setFilterOwned(null)}>Semua</button>
+            <button className={`cp owned-pill${filterOwned === 'owned' ? ' active' : ''}`} onClick={() => setFilterOwned(filterOwned === 'owned' ? null : 'owned')}>
+              ✓ Sudah dimiliki <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{checkedCount}</span>
+            </button>
+            <button className={`cp missing-pill${filterOwned === 'missing' ? ' active' : ''}`} onClick={() => setFilterOwned(filterOwned === 'missing' ? null : 'missing')}>
+              ○ Belum dimiliki <span style={{ opacity: 0.5, fontSize: 9, marginLeft: 2 }}>{DOCS.length - checkedCount}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Progress bar kepemilikan */}
+      <div className="progress-wrap">
+        <div className="progress-bar">
+          <div className="progress-fill" style={{ width: `${(checkedCount / DOCS.length) * 100}%` }} />
+        </div>
+        <span className="progress-label">{checkedCount} / {DOCS.length} dokumen dimiliki</span>
       </div>
 
       {/* Timeline */}
@@ -318,15 +359,16 @@ export default function App() {
               {docs.map((d, i) => {
                 const cat = categorize(d.perihal)
                 const isSel = selected?.id === d.id
+                const isDone = checked.has(d.id)
                 return (
                   <div
                     key={d.id}
-                    className={`doc-item${isSel ? ' sel' : ''}`}
+                    className={`doc-item${isSel ? ' sel' : ''}${isDone ? ' doc-checked' : ''}`}
                     style={{ animationDelay: `${(i % 15) * 15}ms` }}
                   >
                     <div className="doc-dot" />
                     <div
-                      className={`doc-card${isSel ? ' active' : ''}`}
+                      className={`doc-card${isSel ? ' active' : ''}${isDone ? ' card-checked' : ''}`}
                       onClick={() => setSelected(isSel ? null : d)}
                     >
                       <div className="dc-top">
@@ -342,10 +384,17 @@ export default function App() {
                         <div className="dc-nomor">{d.nomor_surat}</div>
                       )}
                       <div className="dc-sender">
-                        {(d.pengirim ?? '').length > 80
-                          ? d.pengirim.substring(0, 80) + '...'
-                          : d.pengirim}
+                        {(d.pengirim ?? '').length > 80 ? d.pengirim.substring(0, 80) + '...' : d.pengirim}
                       </div>
+
+                      {/* Tombol checklist di kartu */}
+                      <button
+                        className={`check-btn${isDone ? ' checked' : ''}`}
+                        onClick={(e) => toggleCheck(d.id, e)}
+                        title={isDone ? 'Tandai belum dimiliki' : 'Tandai sudah dimiliki'}
+                      >
+                        {isDone ? '✓ Dimiliki' : '+ Tandai Dimiliki'}
+                      </button>
                     </div>
                   </div>
                 )
@@ -357,7 +406,12 @@ export default function App() {
 
       {/* Detail panel */}
       {selected && (
-        <DetailPanel doc={selected} onClose={() => setSelected(null)} />
+        <DetailPanel
+          doc={selected}
+          checked={checked}
+          onToggleCheck={(id) => toggleCheck(id)}
+          onClose={() => setSelected(null)}
+        />
       )}
     </div>
   )
